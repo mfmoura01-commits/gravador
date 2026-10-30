@@ -61,7 +61,7 @@
   <div class="card">
     <p>Digite a senha do app. Ela fica guardada neste aparelho.</p>
     <p id="pwdMsg" class="msg hidden">Senha incorreta. As gravações estão guardadas e serão transcritas depois que você entrar.</p>
-    <input id="pwd" type="password" autocomplete="current-password" placeholder="Senha">
+    <input id="pwd" type="password" autocapitalize="off" autocorrect="off" spellcheck="false" autocomplete="current-password" placeholder="Senha">
     <p class="row" style="margin-top:12px"><button class="primary" id="pwdOk">Entrar</button></p>
   </div>
 </section>
@@ -133,7 +133,7 @@ const fmtData = (t) => new Date(t).toLocaleString("pt-BR", { dateStyle: "short",
 const show = (v) => { for (const s of ["vLogin", "vHome", "vDetail"]) $(s).classList.toggle("hidden", s !== v); window.scrollTo(0, 0); };
 
 // ---------- Banco local (IndexedDB) ----------
-// Cada gravação: { id, created, title, lang, durMs, parts: [{ i, blob, mime, text, state }], summary }
+// Cada gravação: { id, created, title, lang, durMs, parts: [{ i, data (ArrayBuffer), mime, text, state }], summary }
 let dbp;
 function db() {
   return dbp ||= new Promise((ok, fail) => {
@@ -167,7 +167,11 @@ function alterar(id, fn) {
 
 // ---------- Chamadas ao servidor ----------
 async function api(path, body, headers = {}) {
-  const r = await fetch(path, { method: "POST", body, headers: { "x-app-password": store.get("pwd", ""), ...headers } });
+  const ctl = new AbortController(); const t = setTimeout(() => ctl.abort(), 60000);
+  let r;
+  try { r = await fetch(path, { method: "POST", body, signal: ctl.signal, headers: { "x-app-password": store.get("pwd", ""), ...headers } }); }
+  catch (e) { throw new Error(e.name === "AbortError" ? "Sem resposta do servidor em 60 s." : "Falha de conexão. Verifique a internet."); }
+  finally { clearTimeout(t); }
   const j = await r.json().catch(() => ({ error: "Resposta inválida do servidor (" + r.status + ")" }));
   if (r.status === 401) {
     store.del("pwd");
@@ -186,7 +190,7 @@ async function transcrever(id, i) {
   let ultimoErro;
   for (let tentativa = 1; tentativa <= 3; tentativa++) {
     try {
-      const { text } = await api("/api/transcribe", p.blob, { "content-type": p.mime, "x-language": rec.lang || "" });
+      const { text } = await api("/api/transcribe", audioDe(p), { "content-type": p.mime, "x-language": rec.lang || "" });
       await alterar(id, (r) => { r.parts[i].text = text; r.parts[i].state = "ok"; r.parts[i].err = ""; });
       atualizarTelas(id); return;
     } catch (e) {
@@ -199,6 +203,8 @@ async function transcrever(id, i) {
   atualizarTelas(id);
 }
 
+// Áudio de um trecho como bytes (aceita também o formato antigo, com Blob)
+const audioDe = (p) => p.data || p.blob;
 const textoDe = (rec) => rec.parts.filter((p) => p.text).map((p) => p.text).join("\n\n");
 const pendentes = (rec) => rec.parts.filter((p) => p.state !== "ok").length;
 
@@ -237,13 +243,15 @@ function novoTrecho() {
     const blob = new Blob(pedacos, { type: (r.mimeType || mime || "audio/mp4").split(";")[0] });
     if (gravando) novoTrecho();                       // emenda o próximo trecho imediatamente
     if (blob.size > 2000) {
-      await alterar(id, (rec) => { rec.parts[i] = { i, blob, mime: blob.type, text: "", state: "fila" }; rec.durMs = Date.now() - rec.created; });
+      // Guarda como ArrayBuffer: o Safari às vezes torna ilegíveis os Blobs salvos no IndexedDB.
+      const data = await blob.arrayBuffer();
+      await alterar(id, (rec) => { rec.parts[i] = { i, data, mime: blob.type, text: "", state: "fila" }; rec.durMs = Date.now() - rec.created; });
       transcrever(id, i);
     }
     if (!gravando && i === partIdx - 1) finalizarUI();
   };
   r.onerror = () => aviso("O gravador do iPhone parou com erro. A parte já gravada foi preservada.");
-  r.start(1000);
+  r.start(); // sem fatiar: no Safari o arquivo sai inteiro e válido ao parar
   recorder = r;
 }
 
@@ -312,7 +320,7 @@ async function abrir(id) {
   $("btnRetentar").classList.toggle("hidden", !erros.length);
   $("btnResumir").disabled = !!falta || !textoDe(r);
   // Áudio original, para ouvir de novo (une os trechos)
-  const blobs = r.parts.filter((p) => p.blob).map((p) => p.blob);
+  const blobs = r.parts.filter((p) => p.data || p.blob).map((p) => new Blob([audioDe(p)], { type: p.mime }));
   if (audioUrl) URL.revokeObjectURL(audioUrl);
   if (blobs.length === 1) { audioUrl = URL.createObjectURL(blobs[0]); $("dAudio").src = audioUrl; $("dAudio").classList.remove("hidden"); }
   else $("dAudio").classList.add("hidden");
