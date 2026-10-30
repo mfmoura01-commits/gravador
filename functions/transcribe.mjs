@@ -23,7 +23,8 @@ export default async (req) => {
 
   const tipo = (req.headers.get("content-type") || "audio/mp4").split(";")[0];
   const ext = tipo.includes("webm") ? "webm" : tipo.includes("ogg") ? "ogg" : tipo.includes("wav") ? "wav" : "m4a";
-  const idioma = req.headers.get("x-language") || ""; // "pt", "en" ou vazio = automático
+  // O Groq só aceita o código curto do idioma ("pt", "en"...). "pt-BR" vira "pt"; vazio = detectar.
+  const idioma = (req.headers.get("x-language") || "").trim().toLowerCase().split(/[-_]/)[0].slice(0, 3);
 
   const audio = await req.arrayBuffer();
   if (audio.byteLength < 1000) return erro(400, "Trecho de áudio vazio.");
