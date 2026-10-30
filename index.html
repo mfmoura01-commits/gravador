@@ -1,0 +1,381 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Gravador</title>
+<meta name="theme-color" content="#14213d">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="Gravador">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<link rel="apple-touch-icon" href="icon-180.png">
+<link rel="icon" href="icon-192.png">
+<link rel="manifest" href="manifest.webmanifest">
+<style>
+  :root {
+    --bg: #f6f5f1; --card: #ffffff; --ink: #1d1d1f; --muted: #6e6e73; --line: #e3e1da;
+    --brand: #14213d; --rec: #d62828; --ok: #2a7d4f; --warn: #b26a00;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root { --bg: #111214; --card: #1c1d20; --ink: #f2f2f2; --muted: #9a9aa0; --line: #2c2d31; --brand: #8fb3ff; }
+  }
+  * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+  body { margin: 0; background: var(--bg); color: var(--ink);
+    font: 17px/1.45 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    padding: env(safe-area-inset-top) 16px calc(24px + env(safe-area-inset-bottom)); }
+  header { display: flex; align-items: center; justify-content: space-between; padding: 14px 0 8px; }
+  h1 { font-size: 26px; margin: 0; letter-spacing: -0.02em; }
+  button { font: inherit; border: 0; border-radius: 12px; padding: 10px 14px; background: var(--line); color: var(--ink); cursor: pointer; }
+  button.primary { background: var(--brand); color: #fff; }
+  button:disabled { opacity: .45; }
+  .icon-btn { background: none; color: var(--muted); padding: 6px 8px; font-size: 15px; }
+  .card { background: var(--card); border: 1px solid var(--line); border-radius: 16px; padding: 16px; margin: 12px 0; }
+  .center { text-align: center; }
+  #recBtn { width: 112px; height: 112px; border-radius: 50%; background: var(--rec); color: #fff; font-size: 17px; font-weight: 600;
+    box-shadow: 0 6px 20px rgba(214,40,40,.35); margin: 8px auto 6px; display: block; }
+  #recBtn.on { background: #fff; color: var(--rec); border: 6px solid var(--rec); box-shadow: none; animation: pulse 1.6s infinite; }
+  @keyframes pulse { 50% { box-shadow: 0 0 0 10px rgba(214,40,40,.12); } }
+  #timer { font-variant-numeric: tabular-nums; font-size: 34px; font-weight: 300; margin: 4px 0 0; }
+  .muted { color: var(--muted); font-size: 14px; }
+  .row { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+  select, input, textarea { font: inherit; color: var(--ink); background: var(--bg); border: 1px solid var(--line); border-radius: 10px; padding: 8px 10px; }
+  input, textarea { width: 100%; }
+  .item { display: block; width: 100%; text-align: left; background: var(--card); border: 1px solid var(--line); border-radius: 14px; padding: 12px 14px; margin: 8px 0; }
+  .item b { display: block; font-weight: 600; }
+  .item span { color: var(--muted); font-size: 14px; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+  .badge { font-size: 12px; padding: 2px 8px; border-radius: 99px; background: var(--line); color: var(--muted); margin-left: 6px; font-weight: 500; }
+  .badge.err { background: #fde2e2; color: #9b1c1c; }
+  .text { white-space: pre-wrap; user-select: text; -webkit-user-select: text; }
+  .msg { padding: 10px 12px; border-radius: 10px; background: #fff4e0; color: #6b4200; font-size: 15px; margin: 8px 0; }
+  .hidden { display: none !important; }
+  h2 { font-size: 18px; margin: 18px 0 6px; }
+  .danger { color: var(--rec); background: none; }
+</style>
+</head>
+<body>
+
+<!-- Tela de senha -->
+<section id="vLogin" class="hidden">
+  <header><h1>Gravador</h1></header>
+  <div class="card">
+    <p>Digite a senha do app. Ela fica guardada neste aparelho.</p>
+    <p id="pwdMsg" class="msg hidden">Senha incorreta. As gravações estão guardadas e serão transcritas depois que você entrar.</p>
+    <input id="pwd" type="password" autocomplete="current-password" placeholder="Senha">
+    <p class="row" style="margin-top:12px"><button class="primary" id="pwdOk">Entrar</button></p>
+  </div>
+</section>
+
+<!-- Tela principal -->
+<section id="vHome" class="hidden">
+  <header><h1>Gravador</h1><button class="icon-btn" id="btnSair">Sair</button></header>
+
+  <div class="card center">
+    <button id="recBtn">Gravar</button>
+    <div id="timer">00:00</div>
+    <div id="recInfo" class="muted">Toque para começar</div>
+    <div class="row" style="justify-content:center;margin-top:10px">
+      <label class="muted" for="lang">Idioma</label>
+      <select id="lang">
+        <option value="pt">Português</option>
+        <option value="en">Inglês</option>
+        <option value="es">Espanhol</option>
+        <option value="">Detectar</option>
+      </select>
+    </div>
+    <div id="recWarn" class="msg hidden"></div>
+  </div>
+  <p class="muted">Avise os participantes antes de gravar. Mantenha o app aberto e o iPhone na tomada em reuniões longas: se a tela bloquear ou outro app for aberto, o iPhone interrompe a gravação.</p>
+
+  <h2>Gravações</h2>
+  <div id="list"></div>
+  <p id="empty" class="muted">Nenhuma gravação ainda.</p>
+</section>
+
+<!-- Tela de detalhe -->
+<section id="vDetail" class="hidden">
+  <header><button class="icon-btn" id="btnVoltar">‹ Voltar</button><button class="icon-btn danger" id="btnApagar">Apagar</button></header>
+  <input id="dTitle" aria-label="Título" style="font-size:20px;font-weight:600;border:0;background:none;padding:4px 0">
+  <div id="dMeta" class="muted"></div>
+  <div id="dStatus" class="msg hidden"></div>
+
+  <div class="row" style="margin:12px 0">
+    <button class="primary" id="btnResumir">Resumir</button>
+    <button id="btnCopiar">Copiar texto</button>
+    <button id="btnCompart">Compartilhar</button>
+    <button id="btnRetentar" class="hidden">Transcrever o que faltou</button>
+  </div>
+
+  <div id="dSumBox" class="card hidden"><h2 style="margin-top:0">Resumo</h2><div id="dSum" class="text"></div>
+    <p class="row" style="margin:12px 0 0"><button id="btnCopiarResumo">Copiar resumo</button></p></div>
+
+  <div class="card"><h2 style="margin-top:0">Transcrição</h2><div id="dText" class="text"></div></div>
+  <audio id="dAudio" controls style="width:100%" class="hidden"></audio>
+  <div id="dParts" class="muted"></div>
+</section>
+
+<script>
+"use strict";
+// ---------- Configuração ----------
+const TRECHO_MS = 4 * 60 * 1000;   // cada trecho tem 4 min (fica abaixo do limite de envio do Netlify)
+const BITRATE = 32000;             // 32 kbps: suficiente para voz, ~1 MB por trecho
+
+// ---------- Utilidades ----------
+const $ = (id) => document.getElementById(id);
+const store = {
+  get(k, d) { try { return localStorage.getItem(k) ?? d; } catch { return d; } },
+  set(k, v) { try { localStorage.setItem(k, v); } catch {} },
+  del(k) { try { localStorage.removeItem(k); } catch {} },
+};
+const fmtTempo = (ms) => { const s = Math.floor(ms / 1000), h = Math.floor(s / 3600), m = Math.floor(s % 3600 / 60), ss = s % 60;
+  return (h ? h + ":" + String(m).padStart(2, "0") : String(m).padStart(2, "0")) + ":" + String(ss).padStart(2, "0"); };
+const fmtData = (t) => new Date(t).toLocaleString("pt-BR", { dateStyle: "short", timeStyle: "short" });
+const show = (v) => { for (const s of ["vLogin", "vHome", "vDetail"]) $(s).classList.toggle("hidden", s !== v); window.scrollTo(0, 0); };
+
+// ---------- Banco local (IndexedDB) ----------
+// Cada gravação: { id, created, title, lang, durMs, parts: [{ i, blob, mime, text, state }], summary }
+let dbp;
+function db() {
+  return dbp ||= new Promise((ok, fail) => {
+    const r = indexedDB.open("gravador", 1);
+    r.onupgradeneeded = () => r.result.createObjectStore("recs", { keyPath: "id" });
+    r.onsuccess = () => ok(r.result); r.onerror = () => fail(r.error);
+  });
+}
+async function tx(mode, fn) {
+  const d = await db();
+  return new Promise((ok, fail) => {
+    const t = d.transaction("recs", mode), s = t.objectStore("recs"); let out;
+    Promise.resolve(fn(s)).then((v) => out = v);
+    t.oncomplete = () => ok(out); t.onerror = () => fail(t.error);
+  });
+}
+const req2p = (r) => new Promise((ok, fail) => { r.onsuccess = () => ok(r.result); r.onerror = () => fail(r.error); });
+const dbGet = (id) => tx("readonly", (s) => req2p(s.get(id)));
+const dbAll = () => tx("readonly", (s) => req2p(s.getAll()));
+const dbPut = (rec) => tx("readwrite", (s) => { s.put(rec); });
+const dbDel = (id) => tx("readwrite", (s) => { s.delete(id); });
+
+// Gravações alteradas em paralelo (gravação + transcrição) passam por uma fila para não se sobrescreverem.
+const filas = {};
+function alterar(id, fn) {
+  filas[id] = (filas[id] || Promise.resolve()).then(async () => {
+    const rec = await dbGet(id); if (!rec) return; fn(rec); await dbPut(rec);
+  }).catch(console.error);
+  return filas[id];
+}
+
+// ---------- Chamadas ao servidor ----------
+async function api(path, body, headers = {}) {
+  const r = await fetch(path, { method: "POST", body, headers: { "x-app-password": store.get("pwd", ""), ...headers } });
+  const j = await r.json().catch(() => ({ error: "Resposta inválida do servidor (" + r.status + ")" }));
+  if (r.status === 401) {
+    store.del("pwd");
+    if (!gravando) { show("vLogin"); $("pwdMsg").classList.remove("hidden"); }
+    throw Object.assign(new Error("Senha incorreta."), { auth: true });
+  }
+  if (!r.ok) throw new Error(j.error || "Erro " + r.status);
+  return j;
+}
+
+// Transcreve um trecho e guarda o texto. Tenta de novo até 3 vezes.
+async function transcrever(id, i) {
+  const rec = await dbGet(id); const p = rec?.parts[i]; if (!p || p.state === "ok") return;
+  await alterar(id, (r) => r.parts[i].state = "enviando");
+  atualizarTelas(id);
+  let ultimoErro;
+  for (let tentativa = 1; tentativa <= 3; tentativa++) {
+    try {
+      const { text } = await api("/api/transcribe", p.blob, { "content-type": p.mime, "x-language": rec.lang || "" });
+      await alterar(id, (r) => { r.parts[i].text = text; r.parts[i].state = "ok"; r.parts[i].err = ""; });
+      atualizarTelas(id); return;
+    } catch (e) {
+      // Senha errada: não adianta repetir. O trecho fica na fila e é enviado depois do novo login.
+      if (e.auth) { await alterar(id, (r) => r.parts[i].state = "fila"); return; }
+      ultimoErro = e; await new Promise((s) => setTimeout(s, 1500 * tentativa));
+    }
+  }
+  await alterar(id, (r) => { r.parts[i].state = "erro"; r.parts[i].err = ultimoErro.message; });
+  atualizarTelas(id);
+}
+
+const textoDe = (rec) => rec.parts.filter((p) => p.text).map((p) => p.text).join("\n\n");
+const pendentes = (rec) => rec.parts.filter((p) => p.state !== "ok").length;
+
+// ---------- Gravação ----------
+let stream, recorder, recId, inicio, relogio, rotacao, wakeLock, partIdx, gravando = false;
+
+function tipoSuportado() {
+  for (const t of ["audio/mp4", "audio/webm;codecs=opus", "audio/webm", "audio/ogg"]) {
+    if (window.MediaRecorder && MediaRecorder.isTypeSupported(t)) return t;
+  }
+  return "";
+}
+
+async function iniciar() {
+  try {
+    stream = await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true } });
+  } catch (e) { aviso("Sem acesso ao microfone. Libere em Ajustes > Safari > Microfone."); return; }
+  recId = "r" + Date.now(); inicio = Date.now(); partIdx = 0; gravando = true;
+  await dbPut({ id: recId, created: inicio, title: "Gravação de " + fmtData(inicio), lang: $("lang").value, durMs: 0, parts: [], summary: "" });
+  novoTrecho();
+  rotacao = setInterval(() => { if (recorder && recorder.state === "recording") recorder.stop(); }, TRECHO_MS);
+  relogio = setInterval(() => $("timer").textContent = fmtTempo(Date.now() - inicio), 500);
+  manterTelaAcesa();
+  $("recBtn").textContent = "Parar"; $("recBtn").classList.add("on");
+  $("recInfo").textContent = "Gravando…"; $("lang").disabled = true; aviso("");
+  renderLista();
+}
+
+// Cada trecho é um arquivo completo: para-se o gravador e começa-se outro, sem soltar o microfone.
+function novoTrecho() {
+  const mime = tipoSuportado();
+  const r = new MediaRecorder(stream, { ...(mime && { mimeType: mime }), audioBitsPerSecond: BITRATE });
+  const pedacos = [], i = partIdx++, id = recId;
+  r.ondataavailable = (e) => { if (e.data.size) pedacos.push(e.data); };
+  r.onstop = async () => {
+    const blob = new Blob(pedacos, { type: (r.mimeType || mime || "audio/mp4").split(";")[0] });
+    if (gravando) novoTrecho();                       // emenda o próximo trecho imediatamente
+    if (blob.size > 2000) {
+      await alterar(id, (rec) => { rec.parts[i] = { i, blob, mime: blob.type, text: "", state: "fila" }; rec.durMs = Date.now() - rec.created; });
+      transcrever(id, i);
+    }
+    if (!gravando && i === partIdx - 1) finalizarUI();
+  };
+  r.onerror = () => aviso("O gravador do iPhone parou com erro. A parte já gravada foi preservada.");
+  r.start(1000);
+  recorder = r;
+}
+
+function parar() {
+  gravando = false; clearInterval(rotacao); clearInterval(relogio);
+  if (recorder && recorder.state !== "inactive") recorder.stop(); else finalizarUI();
+}
+
+function finalizarUI() {
+  stream?.getTracks().forEach((t) => t.stop()); stream = null;
+  wakeLock?.release?.().catch(() => {}); wakeLock = null;
+  $("recBtn").textContent = "Gravar"; $("recBtn").classList.remove("on");
+  $("recInfo").textContent = "Gravação salva. Transcrevendo…"; $("lang").disabled = false;
+  const id = recId; alterar(id, (r) => r.durMs = Date.now() - r.created).then(() => { renderLista(); abrir(id); });
+}
+
+async function manterTelaAcesa() {
+  try { wakeLock = await navigator.wakeLock?.request("screen"); } catch {}
+}
+document.addEventListener("visibilitychange", () => {
+  if (!gravando) return;
+  if (document.visibilityState === "visible") {
+    manterTelaAcesa();
+    if (!stream || stream.getAudioTracks().every((t) => t.readyState === "ended")) {
+      aviso("A gravação foi interrompida porque o app saiu da tela. O que foi gravado até aqui está salvo. Toque em Parar e grave de novo para continuar.");
+    }
+  }
+});
+
+function aviso(t) { $("recWarn").textContent = t; $("recWarn").classList.toggle("hidden", !t); }
+
+// ---------- Telas ----------
+let abertaId = null;
+
+async function renderLista() {
+  const recs = (await dbAll()).sort((a, b) => b.created - a.created);
+  $("empty").classList.toggle("hidden", recs.length > 0);
+  $("list").replaceChildren(...recs.map((r) => {
+    const b = document.createElement("button"); b.className = "item";
+    const falta = pendentes(r), erro = r.parts.some((p) => p.state === "erro");
+    const titulo = document.createElement("b"); titulo.textContent = r.title;
+    if (r.id === recId && gravando) titulo.insertAdjacentHTML("beforeend", '<em class="badge">gravando</em>');
+    else if (erro) titulo.insertAdjacentHTML("beforeend", '<em class="badge err">falha</em>');
+    else if (falta) titulo.insertAdjacentHTML("beforeend", '<em class="badge">transcrevendo</em>');
+    const prev = document.createElement("span");
+    prev.textContent = fmtTempo(r.durMs || 0) + " · " + (textoDe(r).slice(0, 140) || "—");
+    b.append(titulo, prev); b.onclick = () => abrir(r.id); return b;
+  }));
+}
+
+let audioUrl;
+async function abrir(id) {
+  const r = await dbGet(id); if (!r) return;
+  if (!store.get("pwd", "") && !gravando) { show("vLogin"); $("pwdMsg").classList.remove("hidden"); return; }
+  abertaId = id; show("vDetail");
+  $("dTitle").value = r.title;
+  $("dMeta").textContent = fmtData(r.created) + " · " + fmtTempo(r.durMs || 0) + " · " + r.parts.length + (r.parts.length === 1 ? " trecho" : " trechos");
+  $("dText").textContent = textoDe(r) || "(ainda sem texto)";
+  $("dSum").textContent = r.summary || ""; $("dSumBox").classList.toggle("hidden", !r.summary);
+  const falta = pendentes(r), erros = r.parts.filter((p) => p.state === "erro");
+  const st = $("dStatus");
+  if (r.id === recId && gravando) { st.textContent = "Gravando. A transcrição aparece aqui a cada 4 minutos."; st.classList.remove("hidden"); }
+  else if (erros.length) { st.textContent = erros.length + " trecho(s) não foram transcritos: " + erros[0].err; st.classList.remove("hidden"); }
+  else if (falta) { st.textContent = "Transcrevendo… faltam " + falta + " trecho(s)."; st.classList.remove("hidden"); }
+  else st.classList.add("hidden");
+  $("btnRetentar").classList.toggle("hidden", !erros.length);
+  $("btnResumir").disabled = !!falta || !textoDe(r);
+  // Áudio original, para ouvir de novo (une os trechos)
+  const blobs = r.parts.filter((p) => p.blob).map((p) => p.blob);
+  if (audioUrl) URL.revokeObjectURL(audioUrl);
+  if (blobs.length === 1) { audioUrl = URL.createObjectURL(blobs[0]); $("dAudio").src = audioUrl; $("dAudio").classList.remove("hidden"); }
+  else $("dAudio").classList.add("hidden");
+  $("dParts").textContent = blobs.length > 1 ? "O áudio original fica guardado neste aparelho, dividido em " + blobs.length + " trechos." : "";
+}
+
+function atualizarTelas(id) {
+  renderLista();
+  if (abertaId === id && !$("vDetail").classList.contains("hidden")) abrir(id);
+  if (id === recId && !gravando) {
+    dbGet(id).then((r) => { if (r && !pendentes(r)) $("recInfo").textContent = "Pronto. Toque para gravar de novo."; });
+  }
+}
+
+// ---------- Ações ----------
+$("recBtn").onclick = () => gravando ? parar() : iniciar();
+$("btnVoltar").onclick = () => { abertaId = null; show("vHome"); renderLista(); };
+$("dTitle").onchange = () => alterar(abertaId, (r) => r.title = $("dTitle").value.trim() || r.title);
+
+$("btnResumir").onclick = async () => {
+  const id = abertaId, r = await dbGet(id), btn = $("btnResumir");
+  btn.disabled = true; btn.textContent = "Resumindo…";
+  try {
+    const { summary } = await api("/api/summarize", JSON.stringify({ text: textoDe(r) }), { "content-type": "application/json" });
+    await alterar(id, (x) => x.summary = summary); abrir(id);
+  } catch (e) { $("dStatus").textContent = "Não foi possível resumir: " + e.message; $("dStatus").classList.remove("hidden"); }
+  btn.disabled = false; btn.textContent = "Resumir";
+};
+
+async function copiar(t, btn) {
+  try { await navigator.clipboard.writeText(t); const o = btn.textContent; btn.textContent = "Copiado ✓"; setTimeout(() => btn.textContent = o, 1500); }
+  catch { $("dStatus").textContent = "Não consegui copiar. Toque e segure no texto para selecionar."; $("dStatus").classList.remove("hidden"); }
+}
+$("btnCopiar").onclick = async () => copiar(textoDe(await dbGet(abertaId)), $("btnCopiar"));
+$("btnCopiarResumo").onclick = async () => copiar((await dbGet(abertaId)).summary, $("btnCopiarResumo"));
+$("btnCompart").onclick = async () => {
+  const r = await dbGet(abertaId);
+  const t = r.title + "\n" + fmtData(r.created) + "\n\n" + (r.summary ? "RESUMO\n" + r.summary + "\n\nTRANSCRIÇÃO\n" : "") + textoDe(r);
+  if (navigator.share) navigator.share({ title: r.title, text: t }).catch(() => {}); else copiar(t, $("btnCompart"));
+};
+$("btnRetentar").onclick = async () => {
+  const r = await dbGet(abertaId);
+  for (const p of r.parts) if (p.state !== "ok") await transcrever(r.id, p.i);
+};
+$("btnApagar").onclick = async () => {
+  if (!confirm("Apagar esta gravação e o texto? Não dá para desfazer.")) return;
+  await dbDel(abertaId); abertaId = null; show("vHome"); renderLista();
+};
+
+// ---------- Senha ----------
+$("pwdOk").onclick = () => { const v = $("pwd").value.trim(); if (v) { store.set("pwd", v); $("pwdMsg").classList.add("hidden"); $("pwd").value = ""; entrar(); } };
+$("pwd").onkeydown = (e) => { if (e.key === "Enter") $("pwdOk").click(); };
+$("btnSair").onclick = () => { if (gravando) return; store.del("pwd"); show("vLogin"); };
+$("lang").onchange = () => store.set("lang", $("lang").value);
+
+async function entrar() {
+  show("vHome"); $("lang").value = store.get("lang", "pt"); await renderLista();
+  // Retoma trechos que ficaram sem transcrição (ex.: sem internet na hora)
+  for (const r of await dbAll()) for (const p of r.parts) if (p.state !== "ok" && p.state !== "erro") transcrever(r.id, p.i);
+}
+
+if (!window.MediaRecorder) { document.body.innerHTML = "<p style='padding:24px'>Este navegador não grava áudio. Use o Safari atualizado.</p>"; }
+else if (store.get("pwd", "")) entrar(); else show("vLogin");
+</script>
+</body>
+</html>
