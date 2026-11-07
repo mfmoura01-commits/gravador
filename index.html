@@ -32,7 +32,7 @@
   .icon-btn { background: none; color: var(--muted); padding: 6px 8px; font-size: 15px; }
   .card { background: var(--card); border: 1px solid var(--line); border-radius: 16px; padding: 16px; margin: 12px 0; }
   .center { text-align: center; }
-  #recBtn { width: 112px; height: 112px; border-radius: 50%; background: var(--rec); color: #fff; font-size: 17px; font-weight: 600;
+  #recBtn { width: 120px; height: 120px; line-height: 1.2; border-radius: 50%; background: var(--rec); color: #fff; font-size: 17px; font-weight: 600;
     box-shadow: 0 6px 20px rgba(214,40,40,.35); margin: 8px auto 6px; display: block; }
   #recBtn.on { background: #fff; color: var(--rec); border: 6px solid var(--rec); box-shadow: none; animation: pulse 1.6s infinite; }
   #recBtn.pausa { background: #fff; color: var(--warn); border: 6px solid var(--warn); box-shadow: none; animation: none; }
@@ -56,6 +56,8 @@
   .hidden { display: none !important; }
   h2 { font-size: 18px; margin: 18px 0 6px; }
   .danger { color: var(--rec); background: none; }
+  .vtopo { font-size: 13px; font-weight: 500; color: var(--muted); letter-spacing: 0; }
+  .versao { text-align: center; color: var(--muted); font-size: 12px; margin: 20px 0 6px; }
 </style>
 </head>
 <body>
@@ -73,15 +75,15 @@
 
 <!-- Tela principal -->
 <section id="vHome" class="hidden">
-  <header><h1>Gravador</h1><button class="icon-btn" id="btnSair">Sair</button></header>
+  <header><h1>Gravador <span class="vtopo" data-vcurta></span></h1><button class="icon-btn" id="btnSair">Sair</button></header>
 
   <div class="card center">
-    <button id="recBtn">Gravar</button>
+    <button id="recBtn">Nova<br>gravação</button>
     <div id="timer">00:00</div>
-    <div id="recInfo" class="muted">Toque para começar</div>
+    <div id="recInfo" class="muted">Toque em Nova gravação para começar</div>
     <div class="row" style="justify-content:center">
       <button id="stopBtn" class="hidden">■ Parar e salvar</button>
-      <button id="nextBtn" class="hidden">＋ Salvar e iniciar nova</button>
+      <button id="nextBtn" class="hidden">＋ Nova gravação</button>
     </div>
     <div class="row" style="justify-content:center;margin-top:10px">
       <label class="muted" for="lang">Idioma</label>
@@ -99,11 +101,13 @@
   <h2>Gravações</h2>
   <div id="list"></div>
   <p id="empty" class="muted">Nenhuma gravação ainda.</p>
+  <p class="versao" data-versao></p>
 </section>
 
 <!-- Tela de detalhe -->
 <section id="vDetail" class="hidden">
   <header><button class="back-btn" id="btnVoltar">‹ Gravador</button><button class="icon-btn danger" id="btnApagar">Apagar</button></header>
+  <div class="vtopo" data-vcurta style="margin:-4px 0 4px"></div>
   <input id="dTitle" aria-label="Título" style="font-size:20px;font-weight:600;border:0;background:none;padding:4px 0">
   <div id="dMeta" class="muted"></div>
   <div id="dStatus" class="msg hidden"></div>
@@ -123,11 +127,13 @@
   <audio id="dAudio" controls style="width:100%" class="hidden"></audio>
   <div id="dParts" class="muted"></div>
   <button class="back-btn bottom-back" id="btnVoltar2">‹ Voltar ao gravador</button>
+  <p class="versao" data-versao></p>
 </section>
 
 <script>
 "use strict";
 // ---------- Configuração ----------
+const VERSAO = "v1.5 · 07/11/2026";  // atualizar a cada publicação
 const TRECHO_MS = 4 * 60 * 1000;   // cada trecho tem 4 min (fica abaixo do limite de envio do Netlify)
 const BITRATE = 32000;             // 32 kbps: suficiente para voz, ~1 MB por trecho
 
@@ -272,11 +278,11 @@ function retomar() {
 function atualizarBotoes() {
   const b = $("recBtn");
   b.classList.toggle("on", estado === "gravando"); b.classList.toggle("pausa", estado === "pausado");
-  b.textContent = estado === "gravando" ? "Pausar" : estado === "pausado" ? "Retomar" : "Gravar";
+  if (estado === "parado") b.innerHTML = "Nova<br>gravação"; else b.textContent = estado === "gravando" ? "Pausar" : "Retomar";
   $("stopBtn").classList.toggle("hidden", estado === "parado");
   $("nextBtn").classList.toggle("hidden", estado === "parado");
   $("lang").disabled = estado !== "parado";
-  $("recInfo").textContent = estado === "gravando" ? "Gravando…" : estado === "pausado" ? "Pausado. Toque em Retomar para continuar." : $("recInfo").textContent;
+  $("recInfo").textContent = estado === "gravando" ? "Gravando… (＋ Nova gravação salva esta e começa outra)" : estado === "pausado" ? "Pausado. Toque em Retomar para continuar." : $("recInfo").textContent;
 }
 
 // Cada trecho é um arquivo completo: para-se o gravador e começa-se outro, sem soltar o microfone.
@@ -311,8 +317,8 @@ function parar() {
 function finalizarUI() {
   stream?.getTracks().forEach((t) => t.stop()); stream = null;
   wakeLock?.release?.().catch(() => {}); wakeLock = null;
-  gravando = false; $("timer").textContent = fmtTempo(tempoAtual());
-  $("recInfo").textContent = "Gravação salva. Toque nela na lista abaixo para ver o texto, ou em Gravar para começar outra.";
+  gravando = false; $("timer").textContent = "00:00";
+  $("recInfo").textContent = "Gravação salva (" + fmtTempo(tempoAtual()) + "). Veja o texto na lista abaixo ou toque em Nova gravação.";
   atualizarBotoes();
   if (novaDepois) { novaDepois = false; $("timer").textContent = "00:00"; iniciar(); }
   // Fica nesta tela (não pula para o texto); a gravação aparece no topo da lista.
@@ -384,7 +390,7 @@ function atualizarTelas(id) {
   renderLista();
   if (abertaId === id && !$("vDetail").classList.contains("hidden")) abrir(id);
   if (id === recId && !gravando) {
-    dbGet(id).then((r) => { if (r && !pendentes(r) && estado === "parado") $("recInfo").textContent = "Pronto. Texto disponível na lista abaixo. Toque em Gravar para uma nova gravação."; });
+    dbGet(id).then((r) => { if (r && !pendentes(r) && estado === "parado") $("recInfo").textContent = "Pronto. O texto está na lista abaixo. Toque em Nova gravação para começar outra."; });
   }
 }
 
@@ -392,7 +398,8 @@ function atualizarTelas(id) {
 $("recBtn").onclick = () => estado === "gravando" ? pausar() : estado === "pausado" ? retomar() : iniciar();
 $("stopBtn").onclick = () => parar();
 $("nextBtn").onclick = () => { novaDepois = true; parar(); };
-const voltar = () => { abertaId = null; show("vHome"); renderLista(); };
+const voltar = () => { abertaId = null; show("vHome"); renderLista();
+  if (estado === "parado") { $("timer").textContent = "00:00"; atualizarBotoes(); } };
 $("btnVoltar").onclick = voltar; $("btnVoltar2").onclick = voltar;
 $("btnContinuar").onclick = async () => {
   if (gravando) return;
@@ -443,6 +450,8 @@ async function entrar() {
   for (const r of await dbAll()) for (const p of r.parts) if (p.state !== "ok" && p.state !== "erro") transcrever(r.id, p.i);
 }
 
+document.querySelectorAll("[data-versao]").forEach((e) => e.textContent = "Gravador " + VERSAO);
+document.querySelectorAll("[data-vcurta]").forEach((e) => e.textContent = VERSAO.split(" ")[0]);
 if (!window.MediaRecorder) { document.body.innerHTML = "<p style='padding:24px'>Este navegador não grava áudio. Use o Safari atualizado.</p>"; }
 else if (store.get("pwd", "")) entrar(); else show("vLogin");
 </script>
