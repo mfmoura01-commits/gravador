@@ -35,6 +35,11 @@
   #recBtn { width: 112px; height: 112px; border-radius: 50%; background: var(--rec); color: #fff; font-size: 17px; font-weight: 600;
     box-shadow: 0 6px 20px rgba(214,40,40,.35); margin: 8px auto 6px; display: block; }
   #recBtn.on { background: #fff; color: var(--rec); border: 6px solid var(--rec); box-shadow: none; animation: pulse 1.6s infinite; }
+  #recBtn.pausa { background: #fff; color: var(--warn); border: 6px solid var(--warn); box-shadow: none; animation: none; }
+  #stopBtn { margin-top: 10px; background: var(--brand); color: #fff; font-weight: 600; padding: 12px 22px; }
+  #nextBtn { margin-top: 10px; font-weight: 600; padding: 12px 18px; }
+  .back-btn { font-size: 17px; font-weight: 600; color: var(--brand); background: var(--line); padding: 10px 16px; }
+  .bottom-back { width: 100%; margin: 18px 0 8px; padding: 14px; }
   @keyframes pulse { 50% { box-shadow: 0 0 0 10px rgba(214,40,40,.12); } }
   #timer { font-variant-numeric: tabular-nums; font-size: 34px; font-weight: 300; margin: 4px 0 0; }
   .muted { color: var(--muted); font-size: 14px; }
@@ -74,6 +79,10 @@
     <button id="recBtn">Gravar</button>
     <div id="timer">00:00</div>
     <div id="recInfo" class="muted">Toque para começar</div>
+    <div class="row" style="justify-content:center">
+      <button id="stopBtn" class="hidden">■ Parar e salvar</button>
+      <button id="nextBtn" class="hidden">＋ Salvar e iniciar nova</button>
+    </div>
     <div class="row" style="justify-content:center;margin-top:10px">
       <label class="muted" for="lang">Idioma</label>
       <select id="lang">
@@ -94,7 +103,7 @@
 
 <!-- Tela de detalhe -->
 <section id="vDetail" class="hidden">
-  <header><button class="icon-btn" id="btnVoltar">‹ Voltar</button><button class="icon-btn danger" id="btnApagar">Apagar</button></header>
+  <header><button class="back-btn" id="btnVoltar">‹ Gravador</button><button class="icon-btn danger" id="btnApagar">Apagar</button></header>
   <input id="dTitle" aria-label="Título" style="font-size:20px;font-weight:600;border:0;background:none;padding:4px 0">
   <div id="dMeta" class="muted"></div>
   <div id="dStatus" class="msg hidden"></div>
@@ -104,14 +113,16 @@
     <button id="btnCopiar">Copiar texto</button>
     <button id="btnCompart">Compartilhar</button>
     <button id="btnRetentar" class="hidden">Transcrever o que faltou</button>
+    <button id="btnContinuar">● Continuar gravando</button>
   </div>
 
-  <div id="dSumBox" class="card hidden"><h2 style="margin-top:0">Resumo</h2><div id="dSum" class="text"></div>
+  <div id="dSumBox" class="card hidden"><h2 style="margin-top:0">Resumo</h2><div id="dSumOld" class="msg hidden">Este resumo foi feito antes de você continuar a gravação. Toque em Resumir para atualizar.</div><div id="dSum" class="text"></div>
     <p class="row" style="margin:12px 0 0"><button id="btnCopiarResumo">Copiar resumo</button></p></div>
 
   <div class="card"><h2 style="margin-top:0">Transcrição</h2><div id="dText" class="text"></div></div>
   <audio id="dAudio" controls style="width:100%" class="hidden"></audio>
   <div id="dParts" class="muted"></div>
+  <button class="back-btn bottom-back" id="btnVoltar2">‹ Voltar ao gravador</button>
 </section>
 
 <script>
@@ -209,7 +220,10 @@ const textoDe = (rec) => rec.parts.filter((p) => p.text).map((p) => p.text).join
 const pendentes = (rec) => rec.parts.filter((p) => p.state !== "ok").length;
 
 // ---------- Gravação ----------
-let stream, recorder, recId, inicio, relogio, rotacao, wakeLock, partIdx, gravando = false;
+// estado: "parado" | "gravando" | "pausado". "gravando" (variável) = há uma sessão aberta (gravando ou pausada).
+let stream, recorder, recId, relogio, rotacao, wakeLock, partIdx, gravando = false, estado = "parado";
+let baseMs = 0, sessaoMs = 0, segInicio = 0, novaDepois = false;   // para o relógio: tempo anterior + tempo desta sessão
+const tempoAtual = () => baseMs + sessaoMs + (estado === "gravando" ? Date.now() - segInicio : 0);
 
 function tipoSuportado() {
   for (const t of ["audio/mp4", "audio/webm;codecs=opus", "audio/webm", "audio/ogg"]) {
@@ -218,37 +232,70 @@ function tipoSuportado() {
   return "";
 }
 
-async function iniciar() {
+// Começa uma gravação nova ou, com "existente", continua uma gravação já salva (acrescenta trechos).
+async function iniciar(existente) {
   try {
     stream = await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true } });
   } catch (e) { aviso("Sem acesso ao microfone. Libere em Ajustes > Safari > Microfone."); return; }
-  recId = "r" + Date.now(); inicio = Date.now(); partIdx = 0; gravando = true;
-  await dbPut({ id: recId, created: inicio, title: "Gravação de " + fmtData(inicio), lang: $("lang").value, durMs: 0, parts: [], summary: "" });
+  if (existente) {
+    recId = existente.id; partIdx = existente.parts.length; baseMs = existente.durMs || 0;
+    $("lang").value = existente.lang || "pt";
+  } else {
+    const agora = Date.now();
+    recId = "r" + agora; partIdx = 0; baseMs = 0;
+    await dbPut({ id: recId, created: agora, title: "Gravação de " + fmtData(agora), lang: $("lang").value, durMs: 0, parts: [], summary: "" });
+  }
+  sessaoMs = 0; gravando = true;
+  relogio = setInterval(() => $("timer").textContent = fmtTempo(tempoAtual()), 500);
+  manterTelaAcesa(); aviso("");
+  retomar();
+}
+
+// Pausa: fecha o trecho atual (que já vai para transcrição) e mantém a gravação aberta.
+function pausar() {
+  if (estado !== "gravando") return;
+  sessaoMs += Date.now() - segInicio; estado = "pausado";
+  clearInterval(rotacao);
+  if (recorder && recorder.state === "recording") recorder.stop();
+  atualizarBotoes();
+}
+
+// Retoma (ou começa) a captação: abre um trecho novo na mesma gravação.
+function retomar() {
+  estado = "gravando"; segInicio = Date.now();
   novoTrecho();
+  clearInterval(rotacao);
   rotacao = setInterval(() => { if (recorder && recorder.state === "recording") recorder.stop(); }, TRECHO_MS);
-  relogio = setInterval(() => $("timer").textContent = fmtTempo(Date.now() - inicio), 500);
-  manterTelaAcesa();
-  $("recBtn").textContent = "Parar"; $("recBtn").classList.add("on");
-  $("recInfo").textContent = "Gravando…"; $("lang").disabled = true; aviso("");
-  renderLista();
+  atualizarBotoes(); renderLista();
+}
+
+function atualizarBotoes() {
+  const b = $("recBtn");
+  b.classList.toggle("on", estado === "gravando"); b.classList.toggle("pausa", estado === "pausado");
+  b.textContent = estado === "gravando" ? "Pausar" : estado === "pausado" ? "Retomar" : "Gravar";
+  $("stopBtn").classList.toggle("hidden", estado === "parado");
+  $("nextBtn").classList.toggle("hidden", estado === "parado");
+  $("lang").disabled = estado !== "parado";
+  $("recInfo").textContent = estado === "gravando" ? "Gravando…" : estado === "pausado" ? "Pausado. Toque em Retomar para continuar." : $("recInfo").textContent;
 }
 
 // Cada trecho é um arquivo completo: para-se o gravador e começa-se outro, sem soltar o microfone.
 function novoTrecho() {
   const mime = tipoSuportado();
   const r = new MediaRecorder(stream, { ...(mime && { mimeType: mime }), audioBitsPerSecond: BITRATE });
-  const pedacos = [], i = partIdx++, id = recId;
+  const pedacos = [], i = partIdx++, id = recId, t0 = Date.now();
   r.ondataavailable = (e) => { if (e.data.size) pedacos.push(e.data); };
   r.onstop = async () => {
     const blob = new Blob(pedacos, { type: (r.mimeType || mime || "audio/mp4").split(";")[0] });
-    if (gravando) novoTrecho();                       // emenda o próximo trecho imediatamente
+    const ms = Date.now() - t0;
+    if (estado === "gravando") novoTrecho();          // rodízio de 4 min: emenda o próximo trecho imediatamente
     if (blob.size > 2000) {
       // Guarda como ArrayBuffer: o Safari às vezes torna ilegíveis os Blobs salvos no IndexedDB.
       const data = await blob.arrayBuffer();
-      await alterar(id, (rec) => { rec.parts[i] = { i, data, mime: blob.type, text: "", state: "fila" }; rec.durMs = Date.now() - rec.created; });
+      await alterar(id, (rec) => { rec.parts[i] = { i, data, mime: blob.type, text: "", state: "fila", ms }; rec.durMs = (rec.durMs || 0) + ms; });
       transcrever(id, i);
     }
-    if (!gravando && i === partIdx - 1) finalizarUI();
+    if (estado === "parado" && i === partIdx - 1) finalizarUI();
   };
   r.onerror = () => aviso("O gravador do iPhone parou com erro. A parte já gravada foi preservada.");
   r.start(); // sem fatiar: no Safari o arquivo sai inteiro e válido ao parar
@@ -256,16 +303,20 @@ function novoTrecho() {
 }
 
 function parar() {
-  gravando = false; clearInterval(rotacao); clearInterval(relogio);
+  if (estado === "gravando") sessaoMs += Date.now() - segInicio;
+  estado = "parado"; clearInterval(rotacao); clearInterval(relogio);
   if (recorder && recorder.state !== "inactive") recorder.stop(); else finalizarUI();
 }
 
 function finalizarUI() {
   stream?.getTracks().forEach((t) => t.stop()); stream = null;
   wakeLock?.release?.().catch(() => {}); wakeLock = null;
-  $("recBtn").textContent = "Gravar"; $("recBtn").classList.remove("on");
-  $("recInfo").textContent = "Gravação salva. Transcrevendo…"; $("lang").disabled = false;
-  const id = recId; alterar(id, (r) => r.durMs = Date.now() - r.created).then(() => { renderLista(); abrir(id); });
+  gravando = false; $("timer").textContent = fmtTempo(tempoAtual());
+  $("recInfo").textContent = "Gravação salva. Toque nela na lista abaixo para ver o texto, ou em Gravar para começar outra.";
+  atualizarBotoes();
+  if (novaDepois) { novaDepois = false; $("timer").textContent = "00:00"; iniciar(); }
+  // Fica nesta tela (não pula para o texto); a gravação aparece no topo da lista.
+  const id = recId; (filas[id] || Promise.resolve()).then(() => renderLista());
 }
 
 async function manterTelaAcesa() {
@@ -276,7 +327,7 @@ document.addEventListener("visibilitychange", () => {
   if (document.visibilityState === "visible") {
     manterTelaAcesa();
     if (!stream || stream.getAudioTracks().every((t) => t.readyState === "ended")) {
-      aviso("A gravação foi interrompida porque o app saiu da tela. O que foi gravado até aqui está salvo. Toque em Parar e grave de novo para continuar.");
+      aviso("A gravação foi interrompida porque o app saiu da tela. O que foi gravado até aqui está salvo. Toque em Parar e salvar e depois, na gravação, em Continuar gravando.");
     }
   }
 });
@@ -311,9 +362,11 @@ async function abrir(id) {
   $("dMeta").textContent = fmtData(r.created) + " · " + fmtTempo(r.durMs || 0) + " · " + r.parts.length + (r.parts.length === 1 ? " trecho" : " trechos");
   $("dText").textContent = textoDe(r) || "(ainda sem texto)";
   $("dSum").textContent = r.summary || ""; $("dSumBox").classList.toggle("hidden", !r.summary);
+  $("dSumOld").classList.toggle("hidden", !r.summary || (r.sumParts ?? r.parts.length) >= r.parts.length);
+  $("btnContinuar").classList.toggle("hidden", gravando);
   const falta = pendentes(r), erros = r.parts.filter((p) => p.state === "erro");
   const st = $("dStatus");
-  if (r.id === recId && gravando) { st.textContent = "Gravando. A transcrição aparece aqui a cada 4 minutos."; st.classList.remove("hidden"); }
+  if (r.id === recId && gravando) { st.textContent = estado === "pausado" ? "Gravação pausada. Volte ao gravador para retomar." : "Gravando. A transcrição aparece aqui a cada 4 minutos."; st.classList.remove("hidden"); }
   else if (erros.length) { st.textContent = erros.length + " trecho(s) não foram transcritos: " + erros[0].err; st.classList.remove("hidden"); }
   else if (falta) { st.textContent = "Transcrevendo… faltam " + falta + " trecho(s)."; st.classList.remove("hidden"); }
   else st.classList.add("hidden");
@@ -331,13 +384,21 @@ function atualizarTelas(id) {
   renderLista();
   if (abertaId === id && !$("vDetail").classList.contains("hidden")) abrir(id);
   if (id === recId && !gravando) {
-    dbGet(id).then((r) => { if (r && !pendentes(r)) $("recInfo").textContent = "Pronto. Toque para gravar de novo."; });
+    dbGet(id).then((r) => { if (r && !pendentes(r) && estado === "parado") $("recInfo").textContent = "Pronto. Texto disponível na lista abaixo. Toque em Gravar para uma nova gravação."; });
   }
 }
 
 // ---------- Ações ----------
-$("recBtn").onclick = () => gravando ? parar() : iniciar();
-$("btnVoltar").onclick = () => { abertaId = null; show("vHome"); renderLista(); };
+$("recBtn").onclick = () => estado === "gravando" ? pausar() : estado === "pausado" ? retomar() : iniciar();
+$("stopBtn").onclick = () => parar();
+$("nextBtn").onclick = () => { novaDepois = true; parar(); };
+const voltar = () => { abertaId = null; show("vHome"); renderLista(); };
+$("btnVoltar").onclick = voltar; $("btnVoltar2").onclick = voltar;
+$("btnContinuar").onclick = async () => {
+  if (gravando) return;
+  const r = await dbGet(abertaId); if (!r) return;
+  voltar(); iniciar(r);
+};
 $("dTitle").onchange = () => alterar(abertaId, (r) => r.title = $("dTitle").value.trim() || r.title);
 
 $("btnResumir").onclick = async () => {
@@ -345,7 +406,7 @@ $("btnResumir").onclick = async () => {
   btn.disabled = true; btn.textContent = "Resumindo…";
   try {
     const { summary } = await api("/api/summarize", JSON.stringify({ text: textoDe(r) }), { "content-type": "application/json" });
-    await alterar(id, (x) => x.summary = summary); abrir(id);
+    await alterar(id, (x) => { x.summary = summary; x.sumParts = x.parts.length; }); abrir(id);
   } catch (e) { $("dStatus").textContent = "Não foi possível resumir: " + e.message; $("dStatus").classList.remove("hidden"); }
   btn.disabled = false; btn.textContent = "Resumir";
 };
