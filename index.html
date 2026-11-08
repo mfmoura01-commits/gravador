@@ -34,7 +34,7 @@
   .center { text-align: center; }
   #recBtn { width: 120px; height: 120px; line-height: 1.2; border-radius: 50%; background: var(--rec); color: #fff; font-size: 17px; font-weight: 600;
     box-shadow: 0 6px 20px rgba(214,40,40,.35); margin: 8px auto 6px; display: block; }
-  #recBtn.on { background: #fff; color: var(--rec); border: 6px solid var(--rec); box-shadow: none; animation: pulse 1.6s infinite; }
+  #recBtn.on { background: #fff; color: var(--rec); border: 6px solid var(--rec); box-shadow: 0 0 0 4px rgba(214,40,40,.12); animation: none; transition: box-shadow .06s linear; }
   #recBtn.pausa { background: #fff; color: var(--warn); border: 6px solid var(--warn); box-shadow: none; animation: none; }
   #stopBtn { margin-top: 10px; background: var(--brand); color: #fff; font-weight: 600; padding: 12px 22px; }
   #nextBtn { margin-top: 10px; font-weight: 600; padding: 12px 18px; }
@@ -133,7 +133,7 @@
 <script>
 "use strict";
 // ---------- Configuração ----------
-const VERSAO = "v1.5 · 07/11/2026";  // atualizar a cada publicação
+const VERSAO = "v1.6 · 07/11/2026";  // atualizar a cada publicação
 const TRECHO_MS = 4 * 60 * 1000;   // cada trecho tem 4 min (fica abaixo do limite de envio do Netlify)
 const BITRATE = 32000;             // 32 kbps: suficiente para voz, ~1 MB por trecho
 
@@ -240,6 +240,7 @@ function tipoSuportado() {
 
 // Começa uma gravação nova ou, com "existente", continua uma gravação já salva (acrescenta trechos).
 async function iniciar(existente) {
+  prepararMedidor();
   try {
     stream = await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true } });
   } catch (e) { aviso("Sem acesso ao microfone. Libere em Ajustes > Safari > Microfone."); return; }
@@ -252,6 +253,7 @@ async function iniciar(existente) {
     await dbPut({ id: recId, created: agora, title: "Gravação de " + fmtData(agora), lang: $("lang").value, durMs: 0, parts: [], summary: "" });
   }
   sessaoMs = 0; gravando = true;
+  ligarMedidor(stream);
   relogio = setInterval(() => $("timer").textContent = fmtTempo(tempoAtual()), 500);
   manterTelaAcesa(); aviso("");
   retomar();
@@ -268,11 +270,48 @@ function pausar() {
 
 // Retoma (ou começa) a captação: abre um trecho novo na mesma gravação.
 function retomar() {
-  estado = "gravando"; segInicio = Date.now();
+  estado = "gravando"; segInicio = Date.now(); actx?.resume?.();
   novoTrecho();
   clearInterval(rotacao);
   rotacao = setInterval(() => { if (recorder && recorder.state === "recording") recorder.stop(); }, TRECHO_MS);
   atualizarBotoes(); renderLista();
+}
+
+// ---------- Medidor de volume: o anel do botão acompanha a intensidade do som ----------
+let actx, fonte, analisador, rafId, nivel = 0;
+function prepararMedidor() {
+  // Criado no toque do botão (o iPhone só libera áudio a partir de um toque)
+  try { actx = actx || new (window.AudioContext || window.webkitAudioContext)(); actx.resume?.(); } catch { actx = null; }
+}
+function ligarMedidor(st) {
+  if (!actx) return;
+  try {
+    fonte?.disconnect();
+    fonte = actx.createMediaStreamSource(st);
+    analisador = actx.createAnalyser(); analisador.fftSize = 1024;
+    fonte.connect(analisador);
+    const buf = new Uint8Array(analisador.fftSize), btn = $("recBtn");
+    cancelAnimationFrame(rafId);
+    const passo = () => {
+      analisador.getByteTimeDomainData(buf);
+      let soma = 0; for (let i = 0; i < buf.length; i++) { const v = (buf[i] - 128) / 128; soma += v * v; }
+      const rms = Math.sqrt(soma / buf.length);
+      const alvo = Math.min(1, rms * 5);                       // fala normal ~0,4–0,8
+      nivel = alvo > nivel ? alvo * 0.6 + nivel * 0.4 : nivel * 0.88;   // sobe rápido, desce suave
+      if (estado === "gravando") {
+        const r = 4 + nivel * 30;
+        btn.style.boxShadow = `0 0 0 ${r.toFixed(1)}px rgba(214,40,40,${(0.12 + nivel * 0.3).toFixed(2)}), 0 0 ${(r * 1.4).toFixed(0)}px rgba(214,40,40,${(nivel * 0.35).toFixed(2)})`;
+      } else btn.style.boxShadow = "";
+      rafId = requestAnimationFrame(passo);
+    };
+    passo();
+  } catch {}
+}
+function desligarMedidor() {
+  cancelAnimationFrame(rafId); rafId = null; nivel = 0;
+  try { fonte?.disconnect(); } catch {} fonte = null;
+  try { actx?.suspend?.(); } catch {}
+  $("recBtn").style.boxShadow = "";
 }
 
 function atualizarBotoes() {
@@ -315,6 +354,7 @@ function parar() {
 }
 
 function finalizarUI() {
+  desligarMedidor();
   stream?.getTracks().forEach((t) => t.stop()); stream = null;
   wakeLock?.release?.().catch(() => {}); wakeLock = null;
   gravando = false; $("timer").textContent = "00:00";
