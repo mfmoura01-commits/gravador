@@ -57,6 +57,8 @@
   h2 { font-size: 18px; margin: 18px 0 6px; }
   .danger { color: var(--rec); background: none; }
   .vtopo { font-size: 13px; font-weight: 500; color: var(--muted); letter-spacing: 0; }
+  .trecho { font-size: 14px; padding: 6px 10px; }
+  .trecho.atual { background: var(--brand); color: #fff; }
   .versao { text-align: center; color: var(--muted); font-size: 12px; margin: 20px 0 6px; }
 </style>
 </head>
@@ -124,7 +126,10 @@
     <p class="row" style="margin:12px 0 0"><button id="btnCopiarResumo">Copiar resumo</button></p></div>
 
   <div class="card"><h2 style="margin-top:0">Transcrição</h2><div id="dText" class="text"></div></div>
-  <audio id="dAudio" controls style="width:100%" class="hidden"></audio>
+  <div id="dPlayer" class="hidden">
+    <audio id="dAudio" controls style="width:100%"></audio>
+    <div id="dTrechos" class="row" style="margin-top:8px"></div>
+  </div>
   <div id="dParts" class="muted"></div>
   <button class="back-btn bottom-back" id="btnVoltar2">‹ Voltar ao gravador</button>
   <p class="versao" data-versao></p>
@@ -133,7 +138,7 @@
 <script>
 "use strict";
 // ---------- Configuração ----------
-const VERSAO = "v1.6 · 07/11/2026";  // atualizar a cada publicação
+const VERSAO = "v1.7 · 09/11/2026";  // atualizar a cada publicação
 const TRECHO_MS = 4 * 60 * 1000;   // cada trecho tem 4 min (fica abaixo do limite de envio do Netlify)
 const BITRATE = 32000;             // 32 kbps: suficiente para voz, ~1 MB por trecho
 
@@ -399,7 +404,33 @@ async function renderLista() {
   }));
 }
 
-let audioUrl;
+// ---------- Player: toca todos os trechos em sequência ----------
+let audioUrls = [], trechoAtual = 0, playerId = null;
+function montarPlayer(r) {
+  const partes = r.parts.filter((p) => p && (p.data || p.blob));
+  const mudou = playerId !== r.id || audioUrls.length !== partes.length;
+  if (!mudou) return;                                  // não reinicia o áudio a cada atualização da tela
+  audioUrls.forEach((u) => URL.revokeObjectURL(u));
+  audioUrls = partes.map((p) => URL.createObjectURL(new Blob([audioDe(p)], { type: p.mime })));
+  playerId = r.id; trechoAtual = 0;
+  $("dPlayer").classList.toggle("hidden", !audioUrls.length);
+  const box = $("dTrechos"); box.replaceChildren();
+  if (audioUrls.length > 1) {
+    audioUrls.forEach((_, i) => {
+      const b = document.createElement("button"); b.className = "trecho"; b.textContent = "Trecho " + (i + 1);
+      b.onclick = () => tocarTrecho(i, true); box.append(b);
+    });
+  }
+  $("dParts").textContent = audioUrls.length > 1 ? "O play toca os " + audioUrls.length + " trechos em sequência. Toque num trecho para ir direto a ele." : "";
+  tocarTrecho(0, false);
+}
+function tocarTrecho(i, tocar) {
+  if (!audioUrls[i]) return;
+  trechoAtual = i; const a = $("dAudio"); a.src = audioUrls[i];
+  [...$("dTrechos").children].forEach((b, j) => b.classList.toggle("atual", j === i));
+  if (tocar) a.play().catch(() => {});
+}
+$("dAudio").addEventListener("ended", () => { if (trechoAtual + 1 < audioUrls.length) tocarTrecho(trechoAtual + 1, true); });
 async function abrir(id) {
   const r = await dbGet(id); if (!r) return;
   if (!store.get("pwd", "") && !gravando) { show("vLogin"); $("pwdMsg").classList.remove("hidden"); return; }
@@ -418,12 +449,7 @@ async function abrir(id) {
   else st.classList.add("hidden");
   $("btnRetentar").classList.toggle("hidden", !erros.length);
   $("btnResumir").disabled = !!falta || !textoDe(r);
-  // Áudio original, para ouvir de novo (une os trechos)
-  const blobs = r.parts.filter((p) => p.data || p.blob).map((p) => new Blob([audioDe(p)], { type: p.mime }));
-  if (audioUrl) URL.revokeObjectURL(audioUrl);
-  if (blobs.length === 1) { audioUrl = URL.createObjectURL(blobs[0]); $("dAudio").src = audioUrl; $("dAudio").classList.remove("hidden"); }
-  else $("dAudio").classList.add("hidden");
-  $("dParts").textContent = blobs.length > 1 ? "O áudio original fica guardado neste aparelho, dividido em " + blobs.length + " trechos." : "";
+  montarPlayer(r);
 }
 
 function atualizarTelas(id) {
@@ -438,7 +464,7 @@ function atualizarTelas(id) {
 $("recBtn").onclick = () => estado === "gravando" ? pausar() : estado === "pausado" ? retomar() : iniciar();
 $("stopBtn").onclick = () => parar();
 $("nextBtn").onclick = () => { novaDepois = true; parar(); };
-const voltar = () => { abertaId = null; show("vHome"); renderLista();
+const voltar = () => { $("dAudio").pause(); playerId = null; abertaId = null; show("vHome"); renderLista();
   if (estado === "parado") { $("timer").textContent = "00:00"; atualizarBotoes(); } };
 $("btnVoltar").onclick = voltar; $("btnVoltar2").onclick = voltar;
 $("btnContinuar").onclick = async () => {
